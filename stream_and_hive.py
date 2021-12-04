@@ -90,7 +90,8 @@ def main():
                 from_json(raw_events.value.cast('string'),
                           purchase_sword_event_schema()).alias('json')) \
         .select('raw_event', 'timestamp', 'json.*')
-
+    
+    #Creates hive entry, could be separate script. Need pyspark and hive enabling 
     spark.sql("drop table if exists sword_purchases")
     spark.sql("drop table if exists join_guild")
     sql_string = """
@@ -137,7 +138,7 @@ def main():
         .trigger(processingTime="10 seconds") \
         .start()
 
-    spark.streams.awaitAnyTermination()
+    spark.streams.awaitAnyTermination() #Blocking element
 
 
 if __name__ == "__main__":
