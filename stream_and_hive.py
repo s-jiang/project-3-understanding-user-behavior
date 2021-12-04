@@ -49,7 +49,7 @@ def is_sword_purchase(event_as_json):
     return False
 
 @udf('boolean')
-def is_guild_join(event_as_json):
+def is_join_guild(event_as_json):
     """
     udf for filtering join_guild events
     """
@@ -60,8 +60,7 @@ def is_guild_join(event_as_json):
 
 
 def main():
-    """
-    main
+    """main
     """
     spark = SparkSession \
         .builder \
@@ -83,17 +82,18 @@ def main():
                 from_json(raw_events.value.cast('string'),
                           purchase_sword_event_schema()).alias('json')) \
         .select('raw_event', 'timestamp', 'json.*')
-    
-    guild_joins = raw_events \
-        .filter(is_guild_join(raw_events.value.cast('string'))) \
+
+    join_guild = raw_events \
+        .filter(is_join_guild(raw_events.value.cast('string'))) \
         .select(raw_events.value.cast('string').alias('raw_event'),
                 raw_events.timestamp.cast('string'),
                 from_json(raw_events.value.cast('string'),
-                          join_guild_event_schema()).alias('json')) \
+                          purchase_sword_event_schema()).alias('json')) \
         .select('raw_event', 'timestamp', 'json.*')
 
     spark.sql("drop table if exists sword_purchases")
-    sword_sql_string = """
+    spark.sql("drop table if exists join_guild")
+    sql_string = """
         create external table if not exists sword_purchases (
             raw_event string,
             timestamp string,
@@ -106,20 +106,9 @@ def main():
             location '/tmp/sword_purchases'
             tblproperties ("parquet.compress"="SNAPPY")
             """
-    spark.sql(sword_sql_string)
-
-    sword_sink = sword_purchases \
-        .writeStream \
-        .format("parquet") \
-        .option("checkpointLocation", "/tmp/checkpoints_for_sword_purchases") \
-        .option("path", "/tmp/sword_purchases") \
-        .trigger(processingTime="10 seconds") \
-        .start()
-
-    
-    spark.sql("drop table if exists guild_joins")
-    guild_sql_string = """
-        create external table if not exists guild_joins (
+    spark.sql(sql_string)
+    sql_string1 = """
+        create external table if not exists join_guild (
             raw_event string,
             timestamp string,
             Accept string,
@@ -128,21 +117,28 @@ def main():
             event_type string
             )
             stored as parquet
-            location '/tmp/guild_joins'
+            location '/tmp/join_guild'
             tblproperties ("parquet.compress"="SNAPPY")
             """
-    spark.sql(guild_sql_string)
-
-    guild_sink = guild_joins \
+    spark.sql(sql_string1)
+    sword_sink = sword_purchases \
         .writeStream \
         .format("parquet") \
-        .option("checkpointLocation", "/tmp/checkpoints_for_guild_joins") \
-        .option("path", "/tmp/guild_joins") \
+        .option("checkpointLocation", "/tmp/checkpoints_for_sword_purchases") \
+        .option("path", "/tmp/sword_purchases") \
         .trigger(processingTime="10 seconds") \
         .start()
     
-    sword_sink.awaitAnyTermination()
-    guild_sink.awaitAnyTermination()
+    guild_sink = join_guild \
+        .writeStream \
+        .format("parquet") \
+        .option("checkpointLocation", "/tmp/checkpoints_for_join_guild") \
+        .option("path", "/tmp/join_guild") \
+        .trigger(processingTime="10 seconds") \
+        .start()
+
+    spark.streams.awaitAnyTermination()
+
 
 if __name__ == "__main__":
     main()
