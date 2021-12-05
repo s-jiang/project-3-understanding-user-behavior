@@ -1,6 +1,7 @@
 # Project 3: Understanding User Behavior
 By Shirley Jiang for DATASCI W205 Fall 2021
-'project-3-s-jiang' project submitted by Shirley Jiang for Fall 2021 W205
+
+Project submitted by Shirley Jiang for Fall 2021 W205
 
 ## Files
 - [`README.md`]('README.md') — YOU ARE HERE
