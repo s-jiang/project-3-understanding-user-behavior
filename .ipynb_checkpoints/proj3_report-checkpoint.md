@@ -264,14 +264,14 @@ Once we are satisfied that our curl commands work, we can start streaming more u
 
 We generate a stream of events using the following terminal command:
 
-`i=0; while [ i -le 10 ]; do docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/purchase_a_sword; docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/join_guild; docker-compose exec mids ab -n 5 -H "Host: foo.gmail.com" http://localhost:5000/join_guild; sleep 10; ((i++)); done`
+`i=0; while [ $i -le 10 ]; do docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/purchase_a_sword; docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/join_guild; docker-compose exec mids ab -n 5 -H "Host: foo.gmail.com" http://localhost:5000/join_guild; sleep 10; ((i++)); done`
 
 To break down that single line above, the following bash line has been formatted with indentations:
 
 ```bash
 # Initialize while loop, run 10 times (for 100 seconds)
 i=0;
-while [i -le 10 ]; do 
+while [ $i -le 10 ]; do 
     # Shell lines
     docker-compose exec mids \
         # Access 'ab' (Apache Bench tool) + send 10 requests; Change header to Host: user1.comcast.com
@@ -294,9 +294,14 @@ In words, for every 10 seconds, up until 10 rounds have passed, we will have Apa
 The terminal will start to output verbose summaries of the groups of events generated. They mention the document path (ie. /join_guild), the amount of data transferred, and more. I've omitted those outputs to save space.
 
 ---
+
 ## Stream and Hive
 
-We stream data after processing it through Spark into HDFS and write the metadata of the associated table to the Hive metastore. This can be done within one python script but I chose to split the stream and hive processes into two separate scripts. The script with both stream and hive can be found in [`stream_and_hive.py`](stream_and_hive.py).
+We stream data after processing it through Spark into HDFS and write the metadata of the associated table to the Hive metastore. This can be done within one python script but I chose to split the stream and hive processes into two separate scripts. As general practice it's better to have data streamed and metadata written to Hive separately. The script with both stream and hive can be found in [`stream_and_hive.py`](stream_and_hive.py). It can be run using:
+
+```
+docker-compose exec spark spark-submit /w205/project-3-s-jiang/stream_and_hive.py
+```
 
 Here, we will use `stream.py` and `hive.py`, which will be described in the following sections.
 
@@ -553,6 +558,8 @@ In the same terminal, we can start up Presto using the following terminal comman
 
 Once initialized, we can conduct our analysis, but first, we make some initial queries to look at our tables.
 
+### `show tables;`
+
 ```sql
 show tables;
 ```
@@ -567,6 +574,9 @@ Query 20211205_093328_00002_iur23, FINISHED, 1 node
 Splits: 2 total, 1 done (50.00%)
 0:01 [2 rows, 67B] [3 rows/s, 107B/s]
 ```
+We see two tables for both event types, ready to be queried.
+
+### `describe sword_purchases;`
 
 ```sql
 describe sword_purchases;
@@ -586,6 +596,9 @@ Query 20211205_093414_00003_iur23, FINISHED, 1 node
 Splits: 2 total, 0 done (0.00%)
 0:01 [0 rows, 0B] [0 rows/s, 0B/s]
 ```
+There's sword_purchases.
+
+### `describe join_guild;`
 
 ```sql
 describe join_guild;
@@ -605,6 +618,11 @@ Query 20211205_093438_00004_iur23, FINISHED, 1 node
 Splits: 2 total, 0 done (0.00%)
 0:00 [6 rows, 416B] [20 rows/s, 1.42KB/s]
 ```
+There's join_guild.
+
+### `select * from sword_purchases;`
+
+Next, we preview the table sword_purchases.
 
 ```sql
 select * from sword_purchases;
@@ -629,7 +647,7 @@ Splits: 8 total, 8 done (100.00%)
 
 We can use the arrow keys to navigate the table and use `:q` to exit the table view
 
-I recreated the first two rows of `select * from sword_purchases;` to show what the table looks like:
+Here, I recreated the first two rows of `select * from sword_purchases;` to show what the rows of the table sword_purchases looks like:
 
 | raw_event                                                                                                       | timestamp              | accept | host              | user-agent      | event_type     |
 |-----------------------------------------------------------------------------------------------------------------|------------------------|--------|-------------------|-----------------|----------------|
