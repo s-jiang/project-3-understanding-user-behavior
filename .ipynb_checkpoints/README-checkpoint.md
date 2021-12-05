@@ -3,7 +3,7 @@ By Shirley Jiang for DATASCI W205 Fall 2021
 'project-3-s-jiang' project submitted by Shirley Jiang for Fall 2021 W205
 
 ## Files
-- ['README.md']('README.md') — YOU ARE HERE
+- [`README.md`]('README.md') — YOU ARE HERE
 - [`proj3_report.md`](proj3_report.md) — report for project as a whole
 - [`docker-compose.yml`](docker-compose.yml) — configuration file copied from unit 13a
 - [`game_api.py`](game_api.py) — mobile game server/flask app
