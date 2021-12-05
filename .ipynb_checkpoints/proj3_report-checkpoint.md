@@ -9,19 +9,22 @@ DATASCI W205 Fall 2021
 
 ## Contents
 - Set-up
-- docker-compose.yml: Configuration
-- game_api.py: Flask server
+- `docker-compose.yml`: Configuration
+- `game_api.py`: Flask server
 - Kafka topics
 - Generating data (Two ways)
-- stream.py: Pyspark transformation of generated data
-- hive.py: Sending metadata to Hive and table data to HDFS
-- HDFS (Hadoop Distributed File System)
+    - Curl
+    - Apache Bench
+- Stream and Hive
+    - `stream.py`: Pyspark transformation of generated data
+    - `hive.py`: Sending metadata to Hive and table data to HDFS
+- HDFS (Hadoop Distributed File System) and Hive Metastore
 - Querying processed data with Presto
-- Analyzing the data with Presto queries
+    - Analyzing the data with Presto queries
 
 ---
 
-### Set-up
+## Set-up
 
 For our data pipeline, we need:
 
@@ -30,7 +33,15 @@ For our data pipeline, we need:
 - our Pyspark stream ([stream.py](stream.py))
 - our Hive metastore ([hive.py](hive.py))
 
-#### [`docker-compose.yml`](docker-compose.yml): Configuration
+## [`docker-compose.yml`](docker-compose.yml): Configuration
+
+We have more images in our docker-compose.yml file for our full stack implementation. While we still have Zookeeper for container communication, Kafka for events and queuing, Cloudera for the Hadoop Distributed File System, and Spark for transforming and writing data into the HDFS, we now have a new Presto image for SQL querying from tables in the HDFS and, within the MIDS container, we have Flask for our app server database.
+
+Also worth noting is that within the Cloudera image is our usage
+
+The MIDS container's usage the '5000' port, it will be useful for our Flask app as we will see in later sections of this report.
+
+Additional comments are written within the copy of `docker-compose.yml` below:
 
 ```yml
 ---
@@ -117,9 +128,11 @@ Now, we need to initialize docker-compose in detatched mode:
 
 ---
 
-### [`game_api.py`](game_api.py): Flask server
+## [`game_api.py`](game_api.py): Flask server
 
 We use the Python `flask` library to write our simple API server. We will log the two event types that our mobile game development company is interested in tracking: `purchase_sword` and `join_guild`.
+
+Features of the Flask app are commented in the copy of `game_api.py` below.
 
 ```python
 #!/usr/bin/env python
@@ -128,41 +141,55 @@ from kafka import KafkaProducer
 from flask import Flask, request
 
 app = Flask(__name__)
-producer = KafkaProducer(bootstrap_servers='kafka:29092')
+producer = KafkaProducer(bootstrap_servers='kafka:29092') # Connect the Flask app to Kafka through port 29092
 
 
 def log_to_kafka(topic, event):
+    '''
+    Log inputted event to specified kafka topic name
+    '''
+    # Add request headers to each event. Will get the meta information from each event
+    # Like protocol name, source, sender
     event.update(request.headers)
     producer.send(topic, json.dumps(event).encode())
 
 
-@app.route("/")
+@app.route("/") # Flask-oriented decorator for the default event
 def default_response():
-    default_event = {'event_type': 'default'}
+    # Key:value pair that is sent to kafka queue
+    default_event = {'event_type': 'default'} 
     log_to_kafka('events', default_event)
-    return "This is the default response!\n"
+    return "This is the default response!\n" # Business logic response, string output for user
 
 
-@app.route("/purchase_a_sword")
+@app.route("/purchase_a_sword") # Flask-oriented decorator for the purchase_sword event
 def purchase_a_sword():
-    purchase_sword_event = {'event_type': 'purchase_sword'}
+    # Key:value pair that is sent to kafka queue
+    purchase_sword_event = {'event_type': 'purchase_sword'} 
     log_to_kafka('events', purchase_sword_event)
-    return "Sword Purchased!\n"
+    return "Sword Purchased!\n" # Business logic response, string output for user
 
-@app.route("/join_guild")
+@app.route("/join_guild") # Flask-oriented decorator for the join_guild event
 def join_guild():
-    join_guild_event = {'event_type': 'join_guild'}
+    # Key:value pair that is sent to kafka queue
+    join_guild_event = {'event_type': 'join_guild'} 
     log_to_kafka('events', join_guild_event)
-    return "Guild joined!\n"
+    return "Guild joined!\n" # Business logic response, string output for user
 ```
+
 We run our flask app using a terminal command:
 
 `docker-compose exec mids env FLASK_APP=/w205/project-3-s-jiang/game_api.py flask run --host 0.0.0.0`
 
----
-### Kafka topics
+`0.0.0.0` denotes a network mask, meaning that we accept requests from all users/IP addresses. We need to do this because otherwise we would only be able to accept requests from the localhost.
 
-We will use the default kafka topic settings to create our kafka topic `events`.
+We access Flask in the mids container.
+
+---
+
+## Kafka topics
+
+In a new terminal, we will use the default kafka topic settings to create our kafka topic `events`.
 
 `docker-compose exec mids kafkacat -C -b kafka:29092 -t events -o beginning`
 
@@ -175,14 +202,26 @@ Topic: events   TopicId: mQeU4TsDQ0KQh1OU7Yi3lw PartitionCount: 1       Replicat
 Topic: events   Partition: 0    Leader: 1       Replicas: 1     Isr: 1
 ```
 
+At this point, the kafka queue will be waiting to recieve event data. We will go over generating events in the next section. Events will show up within the terminal where this command is run. An example output looks like the following:
 
-### Generating data (Two ways)
+```
+{"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent": "ApacheBench/2.3"}
+{"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent": "ApacheBench/2.3"}
+{"Host": "user1.comcast.com", "event_type": "join_guild", "Accept": "*/*", "User-Agent": "ApacheBench/2.3"}
+{"Host": "user1.comcast.com", "event_type": "join_guild", "Accept": "*/*", "User-Agent": "ApacheBench/2.3"}
+```
 
-We can generate individual events with curl or in simulate a lot of user interaction data using Apache Bench.
+---
 
-#### Curl
+## Generating data (Two ways)
+
+In a new terminal, we can generate individual events with curl or in simulate a lot of user interaction data using Apache Bench. 
+
+### Curl
 
 To test whether our server is recieving our user's event, we can generate individual events using curl. The following terminal commands should display their event type's corresponding response. This means that we've accessed http://localhost:5000/ correctly. 
+
+The "5000" in http://localhost:5000/ refers to the default port number. The Flask server listens to port 5000 for incoming messages. http://localhost:5000/ connects to the local host and sends a message to port 5000. We use the http protocol to send requests to our flask server. For this project, we will only use the GET request, but there are other types of requests like POST, CHANGE, and DELETE.
 
 `docker-compose exec mids curl http://localhost:5000/`
 
@@ -219,7 +258,7 @@ We recieve something like:
 > 127.0.0.1 - - [05/Dec/2021 00:01:06] "GET /purchase_a_swor HTTP/1.1" 404 -
 
 
-#### Apache Bench
+### Apache Bench
 
 Once we are satisfied that our curl commands work, we can start streaming more user events to simulate an unending stream of events entering into our pipeline.
 
@@ -227,14 +266,18 @@ We generate a stream of events using the following terminal command:
 
 `i=0; while [ i -le 10 ]; do docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/purchase_a_sword; docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/join_guild; docker-compose exec mids ab -n 5 -H "Host: foo.gmail.com" http://localhost:5000/join_guild; sleep 10; ((i++)); done`
 
-To break down that single line above, the following line has been formatted with indentations:
+To break down that single line above, the following bash line has been formatted with indentations:
 
 ```bash
+# Initialize while loop, run 10 times (for 100 seconds)
 i=0;
 while [i -le 10 ]; do 
+    # Shell lines
     docker-compose exec mids \
-        ab -n 10 -H "Host: user1.comcast.com" \ 
-            http://localhost:5000/purchase_a_sword; \
+        # Access 'ab' (Apache Bench tool) + send 10 requests; Change header to Host: user1.comcast.com
+        ab -n 10 -H "Host: user1.comcast.com" \    
+            # Send request to purchase_a_sword to local host
+            http://localhost:5000/purchase_a_sword; \ 
     docker-compose exec mids \
         ab -n 10 -H "Host: user1.comcast.com" \
             http://localhost:5000/join_guild; 
@@ -248,9 +291,24 @@ while [i -le 10 ]; do
 
 In words, for every 10 seconds, up until 10 rounds have passed, we will have Apache Bench generate 10 purchase_a_sword events from user user1.comcast.com, 10 join_guild events from user1.comcast.com, and 5 join_guild events from foo.gmail.com.
 
-### stream.py: Pyspark transformation of generated data
+The terminal will start to output verbose summaries of the groups of events generated. They mention the document path (ie. /join_guild), the amount of data transferred, and more. I've omitted those outputs to save space.
 
-Spark will pull events from kafka, define a table schema, filter and transform events and then write them to storage.
+---
+## Stream and Hive
+
+We stream data after processing it through Spark into HDFS and write the metadata of the associated table to the Hive metastore. This can be done within one python script but I chose to split the stream and hive processes into two separate scripts. The script with both stream and hive can be found in [`stream_and_hive.py`](stream_and_hive.py).
+
+Here, we will use `stream.py` and `hive.py`, which will be described in the following sections.
+
+### `stream.py`: Pyspark transformation of generated data
+
+In a new terminal, we will use Spark to pull raw events data from kafka, define a table schema, filter and transform events and then write that data to storage (HDFS).
+
+We choose to define the table schema so we won't have to infer the schema during any querying that happens later on in the pipeline.
+
+Instead of using the terminal version of Pyspark, we use this script to automate the processing of streamed data.
+
+How this works is commented in the copy of `stream.py` below.
 
 ```python
 #!/usr/bin/env python
@@ -265,6 +323,8 @@ from pyspark.sql.types import StructType, StructField, StringType
 
 def purchase_sword_event_schema():
     """
+    Define the table schema for event type: purchase_sword
+    ---
     root
     |-- Accept: string (nullable = true)
     |-- Host: string (nullable = true)
@@ -280,6 +340,8 @@ def purchase_sword_event_schema():
 
 def join_guild_event_schema():
     """
+    Define the table schema for event type: join_guild
+    ---
     root
     |-- Accept: string (nullable = true)
     |-- Host: string (nullable = true)
@@ -294,17 +356,17 @@ def join_guild_event_schema():
     ])
 
 
-@udf('boolean')
+@udf('boolean') # Spark decorator to denote user-defined function. Output = bool
 def is_sword_purchase(event_as_json):
     """
-    udf for filtering purchase_sword events
+    (user-defined function) udf for filtering purchase_sword events
     """
     event = json.loads(event_as_json)
     if event['event_type'] == 'purchase_sword':
         return True
     return False
 
-@udf('boolean')
+@udf('boolean') # Spark decorator to denote user-defined function. Output = bool
 def is_join_guild(event_as_json):
     """
     udf for filtering join_guild events
@@ -319,53 +381,56 @@ def main():
     """
     main
     """
-    spark = SparkSession \
+    spark = SparkSession \ # Initialize the Spark session
         .builder \
         .appName("ExtractEventsJob") \
-        .enableHiveSupport() \
+        .enableHiveSupport() \ # Needed in order to write table metadata to Hive
         .getOrCreate()
 
-    raw_events = spark \
+    raw_events = spark \ # Get queued event data from Kafka topic events, contains all data
         .readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", "kafka:29092") \
         .option("subscribe", "events") \
         .load()
 
-    sword_purchases = raw_events \
-        .filter(is_sword_purchase(raw_events.value.cast('string'))) \
+    sword_purchases = raw_events \ 
+        .filter(is_sword_purchase(raw_events.value.cast('string'))) \ # Filter purchase_sword events
         .select(raw_events.value.cast('string').alias('raw_event'),
                 raw_events.timestamp.cast('string'),
                 from_json(raw_events.value.cast('string'),
-                          purchase_sword_event_schema()).alias('json')) \
+                          purchase_sword_event_schema()).alias('json')) \ # Define table schema for this filtered data
         .select('raw_event', 'timestamp', 'json.*')
 
     join_guild = raw_events \
-        .filter(is_join_guild(raw_events.value.cast('string'))) \
+        .filter(is_join_guild(raw_events.value.cast('string'))) \ # Filter join_guild events
         .select(raw_events.value.cast('string').alias('raw_event'),
                 raw_events.timestamp.cast('string'),
                 from_json(raw_events.value.cast('string'),
-                          join_guild_event_schema()).alias('json')) \
+                          join_guild_event_schema()).alias('json')) \ # Define table schema for this filtered data
         .select('raw_event', 'timestamp', 'json.*')
 
     # Stream data
-    sword_sink = sword_purchases \
+    sword_sink = sword_purchases \ # Starts the streaming data loop
         .writeStream \
-        .format("parquet") \
+        .format("parquet") \ # Use parquet to write to HDFS
         .option("checkpointLocation", "/tmp/checkpoints_for_sword_purchases") \
-        .option("path", "/tmp/sword_purchases") \
-        .trigger(processingTime="10 seconds") \
+        .option("path", "/tmp/sword_purchases") \ # Write sword_purchases table this filepath
+        # .trigger: Writing data is compuationally expensive. Regulate writing operations with timer.
+        .trigger(processingTime="10 seconds") \ # Allows us time to write to HDFS
         .start()
     
     guild_sink = join_guild \
         .writeStream \
-        .format("parquet") \
+        .format("parquet") \ # Use parquet to write to HDFS
         .option("checkpointLocation", "/tmp/checkpoints_for_join_guild") \
-        .option("path", "/tmp/join_guild") \
+        .option("path", "/tmp/join_guild") \ # Write join_guild table this filepath
+        # .trigger: Writing data is compuationally expensive. Regulate writing operations with timer.
         .trigger(processingTime="10 seconds") \
         .start()
     
-    spark.streams.awaitAnyTermination() #Blocking element for multiple writeStreams
+    #Blocking element for multiple writeStreams (see sword_sink and guild_sink)
+    spark.streams.awaitAnyTermination()  # Waits for the command to end the loop.
 
 if __name__ == "__main__":
     main()
@@ -375,7 +440,15 @@ We run this script using the following terminal command:
 
 `docker-compose exec spark spark-submit /w205/project-3-s-jiang/stream.py`
 
+A lot of information will be outputted, including initializaiton of HDFS, reading the defined schema, and processing the functions and data.
+
 ### hive.py: Write table metadata to Hive metastore
+
+The Hive metastore is used to keep track of table scheme throughout the Hadoop and Spark ecosystem. The Hive metastore is spun up in the Cloudera container.
+
+We will run this script in a new terminal.
+
+How this works is commented in the copy of `hive.py` below.
 
 ```python
 #!/usr/bin/env python
@@ -392,7 +465,7 @@ def main():
     main
     """
     # Hive support
-    spark = SparkSession \
+    spark = SparkSession \ # Initialize the Spark session
         .builder \
         .appName("ExtractEventsJob") \
         .enableHiveSupport() \
@@ -442,18 +515,39 @@ We run this script using the following terminal command:
 
 `docker-compose exec spark spark-submit /w205/project-3-s-jiang/hive.py`
 
-### Hadoop
-```
-docker-compose exec cloudera hadoop fs -ls /tmp/sword_purchases
-```
+A large output for the Spark session will appear. Importantly, it will parse the table schemas that we defined.
+
+---
+
+## HDFS (Hadoop Distributed File System) and Hive Metastore
+
+Now, in a new terminal, we can check to see if our tables for each event type have been written to HDFS.
+
+`docker-compose exec cloudera hadoop fs -ls /tmp/sword_purchases`
+`docker-compose exec cloudera hadoop fs -ls /tmp/join_guild`
+
+If we run each of these lines several times while the shell scripting generates data, we should see the number of items in each filepath increase. Here are some example outputs:
 
 ```
-docker-compose exec cloudera hadoop fs -ls /tmp/join_guild
+Found 2 items
+drwxr-xr-x   - root supergroup          0 2021-12-05 09:26 /tmp/sword_purchases/_spark_metadata
+-rw-r--r--   1 root supergroup        688 2021-12-05 09:26 /tmp/sword_purchases/part-
 ```
 
-### Querying processed data with Presto
+Changes to
 
-First, we start up Presto using the following terminal command:
+```
+Found 3 items
+drwxr-xr-x   - root supergroup          0 2021-12-05 09:29 /tmp/sword_purchases/_spark_metadata
+-rw-r--r--   1 root supergroup       2294 2021-12-05 09:29 /tmp/sword_purchases/part-00000-256788c8-b57f-4902-9240-579a535562d2-c000.snappy.parquet
+-rw-r--r--   1 root supergroup        688 2021-12-05 09:26 /tmp/sword_purchases/part-00000-d83b865f-bffd-4274-b2e0-5382cdb3f420-c000.snappy.parquet
+```
+
+---
+
+## Querying processed data with Presto
+
+In the same terminal, we can start up Presto using the following terminal command:
 
 `docker-compose exec presto presto --server presto:8080 --catalog hive --schema default`
 
@@ -461,6 +555,17 @@ Once initialized, we can conduct our analysis, but first, we make some initial q
 
 ```sql
 show tables;
+```
+```
+Table      
+-----------------
+ join_guild      
+ sword_purchases 
+(2 rows)
+
+Query 20211205_093328_00002_iur23, FINISHED, 1 node
+Splits: 2 total, 1 done (50.00%)
+0:01 [2 rows, 67B] [3 rows/s, 107B/s]
 ```
 
 ```sql
@@ -477,9 +582,9 @@ describe sword_purchases;
  event_type | varchar |         
 (6 rows)
 
-Query 20211205_051958_00007_ijbc9, FINISHED, 1 node
-Splits: 2 total, 1 done (50.00%)
-0:01 [6 rows, 446B] [9 rows/s, 677B/s]
+Query 20211205_093414_00003_iur23, FINISHED, 1 node
+Splits: 2 total, 0 done (0.00%)
+0:01 [0 rows, 0B] [0 rows/s, 0B/s]
 ```
 
 ```sql
@@ -496,9 +601,9 @@ describe join_guild;
  event_type | varchar |         
 (6 rows)
 
-Query 20211205_052052_00008_ijbc9, FINISHED, 1 node
-Splits: 2 total, 1 done (50.00%)
-0:00 [6 rows, 416B] [15 rows/s, 1.03KB/s]
+Query 20211205_093438_00004_iur23, FINISHED, 1 node
+Splits: 2 total, 0 done (0.00%)
+0:00 [6 rows, 416B] [20 rows/s, 1.42KB/s]
 ```
 
 ```sql
@@ -541,6 +646,22 @@ Splits: 8 total, 8 done (100.00%)
 ```
 We can use the arrow keys to navigate the table and use `:q` to exit the table view
 
+### Analyzing the data with Presto queries
+
+For this project, Presto is our querying engine. We can query our `sword_purchases` and `join_guild` tables with SQL. This data is considered the data that our pipeline end-users will take for analyzing the user behavior of the users of our mobile app.
+
+Since we generated our own data, the following analysis will not be particularly informative of user behavior; however, the following serves as an example of how analysis could be conducted.
+
+```sql
+select count(*) as count from join_guild;
+```
+```
+count 
+-------
+    50 
+(1 row)
+```
+
 ```sql
 select host as host, count(*) as count from join_guild group by host;
 ```
@@ -555,28 +676,37 @@ Query 20211205_052938_00012_ijbc9, FINISHED, 1 node
 Splits: 9 total, 1 done (11.11%)
 0:03 [30 rows, 8.9KB] [8 rows/s, 2.56KB/s]
 ```
-### Analyzing the data with Presto queries
 
-For this project, Presto is our querying engine. We can query our `sword_purchases` and `join_guild` tables with SQL. This data is considered the data that our pipeline end-users will take for analyzing the user behavior of the users of our mobile app.
+---
 
-Since we generated our own data, the following analysis will not be particularly informative of user behavior; however, the following serves as an example of how analysis could be conducted.
+## And... That's all!
 
+In summation:
+- Users interact with the mobile app
+- Tha mobile app makes API calls to web services
+- The API server handles requests:
+    - It handles actual business requirements (e.g., process purchase_a_sword, join_guild)
+    - Logs events to kafka
+- Spark then:
+    - Pulls events from kafka queue
+    - Filters/flattens/transforms events
+    - Separates event types
+    - Write data to HDFS and metadata to Hive Metastore
+- Presto then queries those events
 
-```sql
-select count(*) as count from join_guild;
-```
-```
-count 
--------
-    50 
-(1 row)
-```
+---
 
-
-
-
-
-
+## Further Reading
+These are some articles that I referenced when writing this report.
+- [Bash `while` loop](https://linuxize.com/post/bash-while-loop/)
+- [`spark.sql.streaming` documentation](https://spark.apache.org/docs/2.2.0/api/java/org/apache/spark/sql/streaming/StreamingQueryManager.html#awaitAnyTermination)
+- [Curl POST request](https://linuxize.com/post/curl-post-request/) - I didn't use this for this project but if I wanted to expand my Flask app, I would use this
+- [Curl POST example](https://gist.github.com/subfuzion/08c5d85437d5d4f00e58) - I didn't use this for this project but if I wanted to expand my Flask app, I would use this
+- [09-Ingesting-Data](https://github.com/mids-w205-schioberg/course-content/blob/master/09-Ingesting-Data/sync-slides.md)
+- [10-Transforming-Streaming-Data](https://github.com/mids-w205-schioberg/course-content/blob/master/10-Transforming-Streaming-Data/sync-slides.md)
+- [11-Storing-Data-III](https://github.com/mids-w205-schioberg/course-content/blob/master/11-Storing-Data-III/sync-slides.md)
+- [12a](https://github.com/mids-w205-schioberg/course-content/blob/master/12a/sync-slides.md)
+- [13a](https://github.com/mids-w205-schioberg/course-content/blob/master/13a/sync-slides.md)
 
 ```docker-compose up -d```
 ```
@@ -699,70 +829,8 @@ docker-compose exec mids \
 - similar to what we saw in hard example
 - we're still going to cheat and implicitly infer schema - but just getting it by select * from another df
 :::
-
-## Can just include all that in job
-
-```python
-#!/usr/bin/env python
-"""Extract events from kafka and write them to hdfs
-"""
-import json
-from pyspark.sql import SparkSession, Row
-from pyspark.sql.functions import udf
-
-
-@udf('boolean')
-def is_purchase(event_as_json):
-    event = json.loads(event_as_json)
-    if event['event_type'] == 'purchase_sword':
-        return True
-    return False
-
-
-def main():
-    """main
-    """
-    spark = SparkSession \
-        .builder \
-        .appName("ExtractEventsJob") \
-        .enableHiveSupport() \
-        .getOrCreate()
-
-    raw_events = spark \
-        .read \
-        .format("kafka") \
-        .option("kafka.bootstrap.servers", "kafka:29092") \
-        .option("subscribe", "events") \
-        .option("startingOffsets", "earliest") \
-        .option("endingOffsets", "latest") \
-        .load()
-
-    purchase_events = raw_events \
-        .select(raw_events.value.cast('string').alias('raw'),
-                raw_events.timestamp.cast('string')) \
-        .filter(is_purchase('raw'))
-
-    extracted_purchase_events = purchase_events \
-        .rdd \
-        .map(lambda r: Row(timestamp=r.timestamp, **json.loads(r.raw))) \
-        .toDF()
-    extracted_purchase_events.printSchema()
-    extracted_purchase_events.show()
-
-    extracted_purchase_events.registerTempTable("extracted_purchase_events")
-
-    spark.sql("""
-        create external table purchases
-        stored as parquet
-        location '/tmp/purchases'
-        as
-        select * from extracted_purchase_events
-    """)
-
-
-if __name__ == "__main__":
-    main()
 ```
+
 
 ::: notes
 - Modified filtered_writes.py to register a temp table and then run it from w/in spark itself
@@ -796,66 +864,3 @@ docker-compose exec spark \
 ::: notes
 To submit a spark job to a cluster, you need a "master"
 :::
-
-## query the hdfs table with presto
-```
-presto:default> show tables;
-   Table   
------------
- purchases 
-(1 row)
-
-Query 20180404_224746_00009_zsma3, FINISHED, 1 node
-Splits: 2 total, 1 done (50.00%)
-0:00 [1 rows, 34B] [10 rows/s, 342B/s]
-```
-
-## Describe `purchases` table
-
-```
-presto:default> describe purchases;
-   Column   |  Type   | Comment 
-------------+---------+---------
- accept     | varchar |         
- host       | varchar |         
- user-agent | varchar |         
- event_type | varchar |         
- timestamp  | varchar |         
-(5 rows)
-
-Query 20180404_224828_00010_zsma3, FINISHED, 1 node
-Splits: 2 total, 1 done (50.00%)
-0:00 [5 rows, 344B] [34 rows/s, 2.31KB/s]
-```
-
-## Query `purchases` table
-
-```
-presto:default> select * from purchases;
- accept |       host        |   user-agent    |   event_type   |        timestamp        
---------+-------------------+-----------------+----------------+-------------------------
- */*    | user1.comcast.com | ApacheBench/2.3 | purchase_sword | 2018-04-04 22:36:13.124 
- */*    | user1.comcast.com | ApacheBench/2.3 | purchase_sword | 2018-04-04 22:36:13.128 
- */*    | user1.comcast.com | ApacheBench/2.3 | purchase_sword | 2018-04-04 22:36:13.131 
- */*    | user1.comcast.com | ApacheBench/2.3 | purchase_sword | 2018-04-04 22:36:13.135 
- */*    | user1.comcast.com | ApacheBench/2.3 | purchase_sword | 2018-04-04 22:36:13.138
- ...
- ```
-
-## down
-
-    docker-compose down
-    
-
-Let's walk through this
-- user interacts with mobile app
-- mobile app makes API calls to web services
-- API server handles requests:
-    - handles actual business requirements (e.g., process purchase)
-    - logs events to kafka
-- spark then:
-    - pulls events from kafka
-    - filters/flattens/transforms events
-    - separates event types
-    - writes to storage
-- presto then queries those events
