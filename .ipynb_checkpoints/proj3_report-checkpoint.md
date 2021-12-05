@@ -185,11 +185,20 @@ We run our flask app using a terminal command:
 
 We access Flask in the mids container.
 
+If successful, we'll see:
+
+```
+ * Serving Flask app "game_api"
+ * Running on http://0.0.0.0:5000/ (Press CTRL+C to quit)
+```
+
+If we see something like `kafka.errors.NoBrokersAvailable: NoBrokersAvailable`, just wait and re-run the terminal command.
+
 ---
 
 ## Kafka topics
 
-In a new terminal, we will use the default kafka topic settings to create our kafka topic `events`.
+In a new terminal, we will use the default kafka topic settings to create our kafka topic `events`. We will queue in incoming data to the topic.
 
 `docker-compose exec mids kafkacat -C -b kafka:29092 -t events -o beginning`
 
@@ -264,7 +273,7 @@ Once we are satisfied that our curl commands work, we can start streaming more u
 
 We generate a stream of events using the following terminal command:
 
-`i=0; while [ $i -le 10 ]; do docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/purchase_a_sword; docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/join_guild; docker-compose exec mids ab -n 5 -H "Host: foo.gmail.com" http://localhost:5000/join_guild; sleep 10; ((i++)); done`
+`i=0; while [ $i -le 10 ]; do docker-compose exec mids ab -n 10 -H "Host: user1.comcast.com" http://localhost:5000/purchase_a_sword; docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/join_guild; docker-compose exec mids ab -n 5 -H "Host: foo.gmail.com" http://localhost:5000/join_guild; sleep 10; ((i++)); done`
 
 To break down that single line above, the following bash line has been formatted with indentations:
 
@@ -302,6 +311,8 @@ We stream data after processing it through Spark into HDFS and write the metadat
 ```
 docker-compose exec spark spark-submit /w205/project-3-s-jiang/stream_and_hive.py
 ```
+
+Again, I will **not** use this script for this report.
 
 Here, we will use `stream.py` and `hive.py`, which will be described in the following sections.
 
@@ -645,7 +656,7 @@ Splits: 8 total, 8 done (100.00%)
 ```
 (For the above output, I removed the middle 20 rows to save space)
 
-We can use the arrow keys to navigate the table and use `:q` to exit the table view
+Since the rows are long, we can use the keyboard arrow keys to navigate the table and use `:q` to exit the table view
 
 Here, I recreated the first two rows of `select * from sword_purchases;` to show what the rows of the table sword_purchases looks like:
 
@@ -699,6 +710,10 @@ Splits: 15 total, 4 done (26.67%)
 ```
 
 Knowing the answer to this question may tell us that we should pursue making more community oriented actions in our mobile game that are similar to join_guild if we want to maximize this kind of user behavior.
+
+From here, we can conduct more queries to understand user behavior, but, since this data is generated and not representative of actual user interaction, there aren't too many insights to gain. With real streamed data, we can do many other SQL queries to understand our data.
+
+To finish, we can exit Presto with `CTRL + D`, and for each running terminal we can exit scripts with `CTRL + C`. Finally, to tear down the entire pipeline we use `docker-compose down`.
 
 ---
 
