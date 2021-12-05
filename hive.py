@@ -50,8 +50,9 @@ def main():
     # Remove table metadata if it exists then write table schema to Hive metastore
     spark.sql("drop table if exists sword_purchases")
     spark.sql("drop table if exists join_guild")
-    spark.sql(sql_string['sword_purchases'])
-    spark.sql(sql_string['join_guild'])
+    # Creates hive entry
+    spark.sql(sql_strings['sword_purchases'])
+    spark.sql(sql_strings['join_guild'])
 
 if __name__ == "__main__":
     main()

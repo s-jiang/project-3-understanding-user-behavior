@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-"""Extract events from kafka and write them to hdfs
+"""
+Extract raw streamed events from kafka, define table schema, process + filter data, and write table to hdfs.
+Also writes table metadata to Hive metastore - Table name, schema, and location
 """
 import json
 from pyspark.sql import SparkSession
@@ -91,10 +93,10 @@ def main():
                           purchase_sword_event_schema()).alias('json')) \
         .select('raw_event', 'timestamp', 'json.*')
     
-    #Creates hive entry, could be separate script. Need pyspark and hive enabling 
-    spark.sql("drop table if exists sword_purchases")
-    spark.sql("drop table if exists join_guild")
-    sql_string = """
+    # Create a dictionary to store sql strings for each event type
+    # Declares the table schema for each event type
+    sql_strings = {}
+    sql_strings['sword_purchases'] = """
         create external table if not exists sword_purchases (
             raw_event string,
             timestamp string,
@@ -107,8 +109,7 @@ def main():
             location '/tmp/sword_purchases'
             tblproperties ("parquet.compress"="SNAPPY")
             """
-    spark.sql(sql_string)
-    sql_string1 = """
+    sql_strings['join_guild'] = """
         create external table if not exists join_guild (
             raw_event string,
             timestamp string,
@@ -121,7 +122,14 @@ def main():
             location '/tmp/join_guild'
             tblproperties ("parquet.compress"="SNAPPY")
             """
-    spark.sql(sql_string1)
+    # Remove table metadata if it exists then write table schema to Hive metastore
+    spark.sql("drop table if exists sword_purchases")
+    spark.sql("drop table if exists join_guild")
+    #Creates hive entry, could be separate script. Need pyspark and hive enabling 
+    spark.sql(sql_strings['sword_purchases'])
+    spark.sql(sql_strings['join_guild'])
+    
+    # Stream data
     sword_sink = sword_purchases \
         .writeStream \
         .format("parquet") \
@@ -138,8 +146,7 @@ def main():
         .trigger(processingTime="10 seconds") \
         .start()
 
-    spark.streams.awaitAnyTermination() #Blocking element
-
+    spark.streams.awaitAnyTermination() #Blocking element for multiple writeStreams
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""Extract streamed events from kafka and write them to hdfs
+"""
+Extract raw streamed events from kafka, define table schema, process + filter data, and write table to hdfs.
 """
 import json
 from pyspark.sql import SparkSession
@@ -92,6 +93,7 @@ def main():
                           join_guild_event_schema()).alias('json')) \
         .select('raw_event', 'timestamp', 'json.*')
 
+    # Stream data
     sword_sink = sword_purchases \
         .writeStream \
         .format("parquet") \
@@ -108,7 +110,7 @@ def main():
         .trigger(processingTime="10 seconds") \
         .start()
     
-    spark.streams.awaitAnyTermination() # For multiple writeStreams
-    
+    spark.streams.awaitAnyTermination() #Blocking element for multiple writeStreams
+
 if __name__ == "__main__":
     main()

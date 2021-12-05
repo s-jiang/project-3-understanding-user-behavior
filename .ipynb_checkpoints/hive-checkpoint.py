@@ -8,8 +8,10 @@ from pyspark.sql.functions import udf, from_json
 from pyspark.sql.types import StructType, StructField, StringType
 
 def main():
-    """main
     """
+    main
+    """
+    # Hive support
     spark = SparkSession \
         .builder \
         .appName("ExtractEventsJob") \
@@ -17,6 +19,7 @@ def main():
         .getOrCreate()
     
     # Create a dictionary to store sql strings for each event type
+    # Declares the table schema for each event type
     sql_strings = {}
     sql_strings['sword_purchases'] = """
         create external table if not exists sword_purchases (
@@ -47,8 +50,9 @@ def main():
     # Remove table metadata if it exists then write table schema to Hive metastore
     spark.sql("drop table if exists sword_purchases")
     spark.sql("drop table if exists join_guild")
-    spark.sql(sql_string['sword_purchases'])
-    spark.sql(sql_string['join_guild'])
+    # Creates hive entry
+    spark.sql(sql_strings['sword_purchases'])
+    spark.sql(sql_strings['join_guild'])
 
 if __name__ == "__main__":
     main()

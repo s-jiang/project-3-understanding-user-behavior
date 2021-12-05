@@ -2,26 +2,36 @@
 By: Shirley Jiang
 DATASCI W205 Fall 2021
 
+---
+
 ## Goal
 - We will create a full stack pipeline, logging a stream of generated events to Kafka, catching the events in a data pipeline, with Spark to filter and select event types, and finally landing the processed data into HDFS/parquet for querying and analysis using Presto.
 
 ## Contents
 - Set-up
-- Game API
+- docker-compose.yml: Configuration
+- game_api.py: Flask server
+- Kafka topics
 - Generating data (Two ways)
-- Pyspark transformation of generated data
-    - Sending metadata to Hive and table data to HDFS
+- stream.py: Pyspark transformation of generated data
+- hive.py: Sending metadata to Hive and table data to HDFS
 - HDFS (Hadoop Distributed File System)
 - Querying processed data with Presto
 - Analyzing the data with Presto queries
 
+---
+
 ### Set-up
-#### Required files
 
-To start up our data pipeline, we need our server ([game_api.py](game_api.py)), we need
-`docker-compose up -d`
+For our data pipeline, we need:
 
-#### docker-compose.yml
+- our configuration file ([docker-compose.yml](docker-compose.yml))
+- our server ([game_api.py](game_api.py))
+- our Pyspark stream ([stream.py](stream.py))
+- our Hive metastore ([hive.py](hive.py))
+
+#### [`docker-compose.yml`](docker-compose.yml): Configuration
+
 ```yml
 ---
 version: '2'
@@ -101,7 +111,14 @@ services:
       - "5000:5000"
 ```
 
-### Game API ([game_api.py](game_api.py))
+Now, we need to initialize docker-compose in detatched mode:
+
+`docker-compose up -d`
+
+---
+
+### [`game_api.py`](game_api.py): Flask server
+
 We use the Python `flask` library to write our simple API server. We will log the two event types that our mobile game development company is interested in tracking: `purchase_sword` and `join_guild`.
 
 ```python
@@ -142,23 +159,103 @@ We run our flask app using a terminal command:
 
 `docker-compose exec mids env FLASK_APP=/w205/project-3-s-jiang/game_api.py flask run --host 0.0.0.0`
 
+---
+### Kafka topics
+
+We will use the default kafka topic settings to create our kafka topic `events`.
+
+`docker-compose exec mids kafkacat -C -b kafka:29092 -t events -o beginning`
+
+To check on default settings, we can use `--describe` to describe the `events` topic
+
+`docker-compose exec kafka kafka-topics --describe --topic events --bootstrap-server kafka:29092 `
+
+```
+Topic: events   TopicId: mQeU4TsDQ0KQh1OU7Yi3lw PartitionCount: 1       ReplicationFactor: 1   Configs: 
+Topic: events   Partition: 0    Leader: 1       Replicas: 1     Isr: 1
+```
+
+
 ### Generating data (Two ways)
+
+We can generate individual events with curl or in simulate a lot of user interaction data using Apache Bench.
+
 #### Curl
+
+To test whether our server is recieving our user's event, we can generate individual events using curl. The following terminal commands should display their event type's corresponding response. This means that we've accessed http://localhost:5000/ correctly. 
+
+`docker-compose exec mids curl http://localhost:5000/`
+
+> This is the default response!
+
+- In the Flask server, it will register as:
+> 127.0.0.1 - - [04/Dec/2021 23:58:27] "GET / HTTP/1.1" 200 -
+
+`docker-compose exec mids curl http://localhost:5000/purchase_a_sword`
+> Sword Purchased! 
+
+- In the Flask server, it will register as:
+> 127.0.0.1 - - [04/Dec/2021 23:58:48] "GET /purchase_a_sword HTTP/1.1" 200 -
+
+`docker-compose exec mids curl http://localhost:5000/join_guild`
+> Guild joined!
+
+- In the Flask server, it will register as:
+> 127.0.0.1 - - [05/Dec/2021 00:03:57] "GET /join_guild HTTP/1.1" 200 -
+
+However, if type or format something incorrectly:
+
+`docker-compose exec mids curl http://localhost:5000/purchase_a_swor`
+
+We recieve something like:
+
 ```
-docker-compose exec mids curl http://localhost:5000/
-docker-compose exec mids curl http://localhost:5000/purchase_a_sword
-docker-compose exec mids curl http://localhost:5000/join_guild
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<title>404 Not Found</title>
+<h1>Not Found</h1>
+<p>The requested URL was not found on the server.  If you entered the URL manually please check your spelling and try again.</p>
 ```
+- We see that our address is incorrect. We won't get a printed message but the Flask server will register the 404
+> 127.0.0.1 - - [05/Dec/2021 00:01:06] "GET /purchase_a_swor HTTP/1.1" 404 -
+
+
 #### Apache Bench
 
+Once we are satisfied that our curl commands work, we can start streaming more user events to simulate an unending stream of events entering into our pipeline.
 
-### Pyspark transformation of generated data
+We generate a stream of events using the following terminal command:
+
+`i=0; while [ i -le 10 ]; do docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/purchase_a_sword; docker-compose exec mids ab -n 5 -H "Host: user1.comcast.com" http://localhost:5000/join_guild; docker-compose exec mids ab -n 5 -H "Host: foo.gmail.com" http://localhost:5000/join_guild; sleep 10; ((i++)); done`
+
+To break down that single line above, the following line has been formatted with indentations:
+
+```bash
+i=0;
+while [i -le 10 ]; do 
+    docker-compose exec mids \
+        ab -n 10 -H "Host: user1.comcast.com" \ 
+            http://localhost:5000/purchase_a_sword; \
+    docker-compose exec mids \
+        ab -n 10 -H "Host: user1.comcast.com" \
+            http://localhost:5000/join_guild; 
+        sleep 10; \
+    docker-compose exec mids \
+        ab -n 5  -H "Host: foo.gmail.com" \
+            http://localhost:5000/join_guild; 
+        sleep 10; 
+    done
+```
+
+In words, for every 10 seconds, up until 10 rounds have passed, we will have Apache Bench generate 10 purchase_a_sword events from user user1.comcast.com, 10 join_guild events from user1.comcast.com, and 5 join_guild events from foo.gmail.com.
+
+### stream.py: Pyspark transformation of generated data
 
 Spark will pull events from kafka, define a table schema, filter and transform events and then write them to storage.
 
 ```python
 #!/usr/bin/env python
-"""Extract events from kafka and write them to hdfs
+"""
+Extract raw streamed events from kafka, define table schema, process + filter data, and write table to hdfs.
 """
 import json
 from pyspark.sql import SparkSession
@@ -219,7 +316,8 @@ def is_join_guild(event_as_json):
 
 
 def main():
-    """main
+    """
+    main
     """
     spark = SparkSession \
         .builder \
@@ -247,39 +345,10 @@ def main():
         .select(raw_events.value.cast('string').alias('raw_event'),
                 raw_events.timestamp.cast('string'),
                 from_json(raw_events.value.cast('string'),
-                          purchase_sword_event_schema()).alias('json')) \
+                          join_guild_event_schema()).alias('json')) \
         .select('raw_event', 'timestamp', 'json.*')
 
-    spark.sql("drop table if exists sword_purchases")
-    spark.sql("drop table if exists join_guild")
-    sql_string = """
-        create external table if not exists sword_purchases (
-            raw_event string,
-            timestamp string,
-            Accept string,
-            Host string,
-            `User-Agent` string,
-            event_type string
-            )
-            stored as parquet
-            location '/tmp/sword_purchases'
-            tblproperties ("parquet.compress"="SNAPPY")
-            """
-    spark.sql(sql_string)
-    sql_string1 = """
-        create external table if not exists join_guild (
-            raw_event string,
-            timestamp string,
-            Accept string,
-            Host string,
-            `User-Agent` string,
-            event_type string
-            )
-            stored as parquet
-            location '/tmp/join_guild'
-            tblproperties ("parquet.compress"="SNAPPY")
-            """
-    spark.sql(sql_string1)
+    # Stream data
     sword_sink = sword_purchases \
         .writeStream \
         .format("parquet") \
@@ -295,20 +364,90 @@ def main():
         .option("path", "/tmp/join_guild") \
         .trigger(processingTime="10 seconds") \
         .start()
-
-    spark.streams.awaitAnyTermination()
-
+    
+    spark.streams.awaitAnyTermination() #Blocking element for multiple writeStreams
 
 if __name__ == "__main__":
     main()
 ```
+
 We run this script using the following terminal command:
 
-`docker-compose exec spark spark-submit /w205/project-3-s-jiang/stream_and_hive.py`
+`docker-compose exec spark spark-submit /w205/project-3-s-jiang/stream.py`
+
+### hive.py: Write table metadata to Hive metastore
+
+```python
+#!/usr/bin/env python
+"""
+Write table metadata to Hive metastore - Table name, schema, and location
+"""
+import json
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import udf, from_json
+from pyspark.sql.types import StructType, StructField, StringType
+
+def main():
+    """
+    main
+    """
+    # Hive support
+    spark = SparkSession \
+        .builder \
+        .appName("ExtractEventsJob") \
+        .enableHiveSupport() \
+        .getOrCreate()
+    
+    # Create a dictionary to store sql strings for each event type
+    # Declares the table schema for each event type
+    sql_strings = {}
+    sql_strings['sword_purchases'] = """
+        create external table if not exists sword_purchases (
+            raw_event string,
+            timestamp string,
+            Accept string,
+            Host string,
+            `User-Agent` string,
+            event_type string
+            )
+            stored as parquet
+            location '/tmp/sword_purchases'
+            tblproperties ("parquet.compress"="SNAPPY")
+            """
+    sql_strings['join_guild'] = """
+        create external table if not exists join_guild (
+            raw_event string,
+            timestamp string,
+            Accept string,
+            Host string,
+            `User-Agent` string,
+            event_type string
+            )
+            stored as parquet
+            location '/tmp/join_guild'
+            tblproperties ("parquet.compress"="SNAPPY")
+            """
+    # Remove table metadata if it exists then write table schema to Hive metastore
+    spark.sql("drop table if exists sword_purchases")
+    spark.sql("drop table if exists join_guild")
+    # Creates hive entry
+    spark.sql(sql_strings['sword_purchases'])
+    spark.sql(sql_strings['join_guild'])
+
+if __name__ == "__main__":
+    main()
+```
+
+We run this script using the following terminal command:
+
+`docker-compose exec spark spark-submit /w205/project-3-s-jiang/hive.py`
 
 ### Hadoop
 ```
 docker-compose exec cloudera hadoop fs -ls /tmp/sword_purchases
+```
+
+```
 docker-compose exec cloudera hadoop fs -ls /tmp/join_guild
 ```
 
@@ -327,20 +466,95 @@ show tables;
 ```sql
 describe sword_purchases;
 ```
+```
+   Column   |  Type   | Comment 
+------------+---------+---------
+ raw_event  | varchar |         
+ timestamp  | varchar |         
+ accept     | varchar |         
+ host       | varchar |         
+ user-agent | varchar |         
+ event_type | varchar |         
+(6 rows)
+
+Query 20211205_051958_00007_ijbc9, FINISHED, 1 node
+Splits: 2 total, 1 done (50.00%)
+0:01 [6 rows, 446B] [9 rows/s, 677B/s]
+```
 
 ```sql
 describe join_guild;
 ```
+```
+   Column   |  Type   | Comment 
+------------+---------+---------
+ raw_event  | varchar |         
+ timestamp  | varchar |         
+ accept     | varchar |         
+ host       | varchar |         
+ user-agent | varchar |         
+ event_type | varchar |         
+(6 rows)
 
+Query 20211205_052052_00008_ijbc9, FINISHED, 1 node
+Splits: 2 total, 1 done (50.00%)
+0:00 [6 rows, 416B] [15 rows/s, 1.03KB/s]
+```
 
 ```sql
 select * from sword_purchases;
 ```
+```
+                                                    raw_event                                
+---------------------------------------------------------------------------------------------
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+(25 rows)
+
+
+Query 20211205_052136_00009_ijbc9, FINISHED, 1 node
+Splits: 8 total, 8 done (100.00%)
+1:16 [20 rows, 8.96KB] [0 rows/s, 121B/s]
+```
+We can use the arrow keys to navigate the table and use `:q` to exit the table view
 
 ```sql
-select * from join_guild;
+select host as host, count(*) as count from join_guild group by host;
 ```
+```
+       host        | count 
+-------------------+-------
+ user1.comcast.com |    25 
+ foo.gmail.com     |    25 
+(2 rows)
 
+Query 20211205_052938_00012_ijbc9, FINISHED, 1 node
+Splits: 9 total, 1 done (11.11%)
+0:03 [30 rows, 8.9KB] [8 rows/s, 2.56KB/s]
+```
 ### Analyzing the data with Presto queries
 
 For this project, Presto is our querying engine. We can query our `sword_purchases` and `join_guild` tables with SQL. This data is considered the data that our pipeline end-users will take for analyzing the user behavior of the users of our mobile app.
@@ -348,8 +562,15 @@ For this project, Presto is our querying engine. We can query our `sword_purchas
 Since we generated our own data, the following analysis will not be particularly informative of user behavior; however, the following serves as an example of how analysis could be conducted.
 
 
-
-
+```sql
+select count(*) as count from join_guild;
+```
+```
+count 
+-------
+    50 
+(1 row)
+```
 
 
 
