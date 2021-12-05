@@ -614,26 +614,7 @@ select * from sword_purchases;
 ---------------------------------------------------------------------------------------------
  {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
  {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
- {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
+ ...
  {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
  {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
  {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent":
@@ -644,7 +625,17 @@ Query 20211205_052136_00009_ijbc9, FINISHED, 1 node
 Splits: 8 total, 8 done (100.00%)
 1:16 [20 rows, 8.96KB] [0 rows/s, 121B/s]
 ```
+(For the above output, I removed the middle 20 rows to save space)
+
 We can use the arrow keys to navigate the table and use `:q` to exit the table view
+
+I recreated the first two rows of `select * from sword_purchases;` to show what the table looks like:
+
+| raw_event                                                                                                       | timestamp              | accept | host              | user-agent      | event_type     |
+|-----------------------------------------------------------------------------------------------------------------|------------------------|--------|-------------------|-----------------|----------------|
+| {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent": "ApacheBench/2.3"  | 2021-12-05 09:41:44.74 | */*    | user1.comcast.com | ApacheBench/2.3 | purchase_sword |
+| {"Host": "user1.comcast.com", "event_type": "purchase_sword", "Accept": "*/*", "User-Agent": "ApacheBench/2.3"} | 2021-12-05 09:41:44.76 | */*    | user1.comcast.com | ApacheBench/2.3 | purchase_sword |
+
 
 ### Analyzing the data with Presto queries
 
@@ -652,15 +643,27 @@ For this project, Presto is our querying engine. We can query our `sword_purchas
 
 Since we generated our own data, the following analysis will not be particularly informative of user behavior; however, the following serves as an example of how analysis could be conducted.
 
+#### Example 1:
+
+We may want to answer: How many join_guild actions do we recieve from our users?
 ```sql
 select count(*) as count from join_guild;
 ```
 ```
-count 
+ count 
 -------
-    50 
+   100 
 (1 row)
+
+Query 20211205_100508_00007_e6h3f, FINISHED, 1 node
+Splits: 14 total, 5 done (35.71%)
+0:01 [35 rows, 8.96KB] [52 rows/s, 13.5KB/s]
 ```
+This may tell us the general popularity of the join_guild feature of our game.
+
+#### Example 2:
+
+We may want to answer: How frequently do our users perform the join_guild action? 
 
 ```sql
 select host as host, count(*) as count from join_guild group by host;
@@ -668,14 +671,16 @@ select host as host, count(*) as count from join_guild group by host;
 ```
        host        | count 
 -------------------+-------
- user1.comcast.com |    25 
- foo.gmail.com     |    25 
+ user1.comcast.com |    50 
+ foo.gmail.com     |    50 
 (2 rows)
 
-Query 20211205_052938_00012_ijbc9, FINISHED, 1 node
-Splits: 9 total, 1 done (11.11%)
-0:03 [30 rows, 8.9KB] [8 rows/s, 2.56KB/s]
+Query 20211205_100530_00008_e6h3f, FINISHED, 1 node
+Splits: 15 total, 4 done (26.67%)
+0:01 [35 rows, 9KB] [46 rows/s, 12KB/s]
 ```
+
+Knowing the answer to this question may tell us that we should pursue making more community oriented actions in our mobile game that are similar to join_guild if we want to maximize this kind of user behavior.
 
 ---
 
@@ -707,160 +712,3 @@ These are some articles that I referenced when writing this report.
 - [11-Storing-Data-III](https://github.com/mids-w205-schioberg/course-content/blob/master/11-Storing-Data-III/sync-slides.md)
 - [12a](https://github.com/mids-w205-schioberg/course-content/blob/master/12a/sync-slides.md)
 - [13a](https://github.com/mids-w205-schioberg/course-content/blob/master/13a/sync-slides.md)
-
-```docker-compose up -d```
-```
-docker-compose logs -f cloudera
-```
-Let's check out hdfs before we write anything to it
-```
-docker-compose exec cloudera hadoop fs -ls /tmp/
-```
-## Create a topic
-
-```
-docker-compose exec kafka \
-  kafka-topics \
-    --create \
-    --topic events \
-    --partitions 1 \
-    --replication-factor 1 \
-    --if-not-exists --zookeeper zookeeper:32181
-```
-```
-docker-compose exec kafka kafka-topics --create --topic events --partitions 1 --replication-factor 1 --if-not-exists --bootstrap-server localhost:29092
-```
-
-    Created topic "events".
-
-## Web-app
-
-- Take our instrumented web-app from before
-`~/w205/full-stack/game_api.py`
-
-```python
-#!/usr/bin/env python
-import json
-from kafka import KafkaProducer
-from flask import Flask, request
-
-app = Flask(__name__)
-producer = KafkaProducer(bootstrap_servers='kafka:29092')
-
-
-def log_to_kafka(topic, event):
-    event.update(request.headers)
-    producer.send(topic, json.dumps(event).encode())
-
-
-@app.route("/")
-def default_response():
-    default_event = {'event_type': 'default'}
-    log_to_kafka('events', default_event)
-    return "This is the default response!\n"
-
-
-@app.route("/purchase_a_sword")
-def purchase_a_sword():
-    purchase_sword_event = {'event_type': 'purchase_sword'}
-    log_to_kafka('events', purchase_sword_event)
-    return "Sword Purchased!\n"
-```
-
-
-## Run flask
-Wk12
-```
-docker-compose exec mids \
-  env FLASK_APP=/w205/full-stack/game_api.py \
-  flask run --host 0.0.0.0
-```
-```
-docker-compose exec mids env FLASK_APP=/w205/project-3-s-jiang/game_api.py flask run --host 0.0.0.0
-```
-## Read from kafka
-```
-docker-compose exec mids \
-  kafkacat -C -b kafka:29092 -t events -o beginning -e
-```
-```
-docker-compose exec mids kafkacat -C -b kafka:29092 -t events -o beginning -e
-```
-## Generate events
-wk 12
-Apache Bench to generate data
-
-```
-docker-compose exec mids \
-  ab \
-    -n 10 \
-    -H "Host: user1.comcast.com" \
-    http://localhost:5000/
-```
-```
-docker-compose exec mids \
-  ab \
-    -n 10 \
-    -H "Host: user1.comcast.com" \
-    http://localhost:5000/purchase_a_sword
-```
-```
-docker-compose exec mids \
-  ab \
-    -n 10 \
-    -H "Host: user2.att.com" \
-    http://localhost:5000/
-```
-```
-docker-compose exec mids \
-  ab \
-    -n 10 \
-    -H "Host: user2.att.com" \
-    http://localhost:5000/purchase_a_sword
-```
-
-`bash ab.sh`
-
-```
-- read parquet from what we wrote into hdfs
-- register temp table
-- create external table purchase event
-- store as parquet
-- similar to what we saw in hard example
-- we're still going to cheat and implicitly infer schema - but just getting it by select * from another df
-:::
-```
-
-
-::: notes
-- Modified filtered_writes.py to register a temp table and then run it from w/in spark itself
-
-:::
-
-## Run this
-
-```
-docker-compose exec spark spark-submit /w205/full-stack/write_hive_table.py
-```
-
-## See it wrote to hdfs
-
-```
-docker-compose exec cloudera hadoop fs -ls /tmp/
-```
-## Deploying a Spark job to a cluster
-```
-docker-compose exec spark spark-submit filename.py
-```
-is really just
-
-```
-docker-compose exec spark \
-  spark-submit \
-    --master 'local[*]' \
-    filename.py
-```
-
-::: notes
-To submit a spark job to a cluster, you need a "master"
-:::
